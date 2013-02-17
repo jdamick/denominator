@@ -1,6 +1,11 @@
 package denominator.model;
 
+import java.util.List;
+
 import org.testng.annotations.Test;
+
+import denominator.model.format.Formatting;
+import denominator.model.format.MasterFileFormatter;
 import static org.testng.Assert.*;
 import static denominator.model.ResourceRecordSet.Builder.*;
 
@@ -22,10 +27,12 @@ public class CnameDataBuilderTest {
         assertFalse(rrset.isEmpty());
         assertEquals(1, rrset.size());
         
-        CnameData cname = rrset.iterator().next();
-        assertEquals("www2", cname.toString());
-        assertEquals(1, cname.getValues().size());
-        assertEquals("www2", cname.getValues().get(0));
+        CnameData rec = rrset.iterator().next();
+        assertEquals("www2", rec.toString());
+        
+        List<String> values = (new Formatting(new MasterFileFormatter())).format(rec);
+        assertEquals(1, values.size());
+        assertEquals("www2", values.get(0));
     }
     
     @Test

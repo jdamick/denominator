@@ -5,9 +5,12 @@ import static com.google.common.base.Preconditions.checkArgument;
 
 import java.util.Set;
 
+import com.google.common.base.Optional;
+import com.google.common.base.Predicate;
 import com.google.common.base.Strings;
 import com.google.common.collect.ForwardingSet;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
 /**
@@ -69,7 +72,7 @@ public class ResourceRecordSet<R extends RData> extends ForwardingSet<R> {
         private Set<T> rdatas = Sets.newLinkedHashSet();
         private String name;
         private long ttl;
-        private int type;
+        private Optional<Integer> type;
         
         
         public Builder<T> name(String name) {
@@ -87,7 +90,7 @@ public class ResourceRecordSet<R extends RData> extends ForwardingSet<R> {
         
         public Builder<T> type(int type) {
             checkArgument(type >= 0 && type <= 0xFFFF, "Invalid type value: %d", ttl);
-            this.type = type;
+            this.type = Optional.of(type);
             return this;
         }
         
@@ -102,21 +105,28 @@ public class ResourceRecordSet<R extends RData> extends ForwardingSet<R> {
         }
         
         public ResourceRecordSet<T> build() {
-            // TODO: do we infer the type from the rdata type?
-            if (type == 0 && !rdatas.isEmpty()) {
-                RData rdata = rdatas.iterator().next();
-                if (rdata instanceof TypedRData) {
-                    type = ((TypedRData) rdata).type();
+            // TODO: should we infer the type from the rdata type, probably.
+            if (!type.isPresent() && !rdatas.isEmpty()) {
+                Optional<T> rdata = Iterables.tryFind(rdatas, new Predicate<T>() {
+                    @Override
+                    public boolean apply(T input) {
+                        return (input != null && input.type() != 0);
+                    }
+                });
+                if (rdata.isPresent()) {
+                    type(rdata.get().type());
+                } else {
+                    throw new IllegalStateException("Must specify the type for an record set");
                 }
             }
-            return new ResourceRecordSet<T>(ImmutableSet.copyOf(rdatas), name, type, ttl);
+            return new ResourceRecordSet<T>(ImmutableSet.copyOf(rdatas), name, type.get(), ttl);
         }
         
         // RData Types
         //////////////
         
         public static RData raw(String value) {
-            return new RData(value);
+            return RawRData.builder().value(value).build();
         }
         
         public static AData.Builder a() {
@@ -128,10 +138,13 @@ public class ResourceRecordSet<R extends RData> extends ForwardingSet<R> {
             return AData.builder().address(address);
         }
         
+        public static AAAAData.Builder aaaa() {
+            return AAAAData.builder();
+        }
+        
         public static CnameData.Builder cname() {
             return CnameData.builder();
         }
-        
         
     }
 }

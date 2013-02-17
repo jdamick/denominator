@@ -10,7 +10,7 @@ import com.google.common.base.Strings;
 /**
  * Class that holds the RDATA for an CNAME record.
  */
-public class CnameData extends RData implements TypedRData {
+public class CnameData extends RData {
 
     protected CnameData(String value) {
         super(value);
