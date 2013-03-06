@@ -1,7 +1,7 @@
 package denominator.ultradns;
 
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Ordering.usingToString;
-import static denominator.ultradns.GroupByRecordNameAndTypeIterator.parseRdataList;
 
 import java.util.Iterator;
 import java.util.List;
@@ -10,15 +10,20 @@ import java.util.Map;
 import javax.inject.Inject;
 
 import org.jclouds.ultradns.ws.UltraDNSWSApi;
+import org.jclouds.ultradns.ws.domain.ResourceRecord;
 import org.jclouds.ultradns.ws.domain.ResourceRecordMetadata;
 import org.jclouds.ultradns.ws.features.ResourceRecordApi;
 
 import com.google.common.base.Optional;
+import com.google.common.base.Predicate;
+import com.google.common.collect.Iterables;
 import com.google.common.primitives.UnsignedInteger;
 
 import denominator.ResourceRecordSetApi;
 import denominator.model.ResourceRecordSet;
 import denominator.model.ResourceRecordSet.Builder;
+
+
 public final class UltraDNSResourceRecordSetApi implements denominator.ResourceRecordSetApi {
     static final class Factory implements denominator.ResourceRecordSetApi.Factory {
 
@@ -61,24 +66,49 @@ public final class UltraDNSResourceRecordSetApi implements denominator.ResourceR
         for (ResourceRecordMetadata existingRecord : existingRecords) {
             if (!ttl.isPresent())
                 ttl = Optional.of(existingRecord.getRecord().getTTL());
-            builder.add(parseRdataList(type, existingRecord.getRecord().getRData()));
+            builder.add(Transformers.toRDataFunction().apply(existingRecord.getRecord()));
         }
         return Optional.<ResourceRecordSet<?>> of(builder.ttl(ttl.get()).build());
     }
 
     @Override
     public void add(ResourceRecordSet<?> rrset) {
-        throw new UnsupportedOperationException("not yet implemented");
+        for (ResourceRecord rec : Transformers.toResourceRecordFunction().apply(rrset)) {
+            api.create(rec);
+        }
     }
 
     @Override
     public void remove(ResourceRecordSet<?> rrset) {
-        throw new UnsupportedOperationException("not yet implemented");
+        for (Map<String, Object> rdata : rrset) {
+            Optional<String> guid = find(rrset.getName(), rrset.getType(), rdata);
+            checkState(guid.isPresent(), "record not found");
+            api.delete(guid.get());
+        }
+    }
+    
+    Optional<String> find(String name, String type, final Map<String, Object> rdata) {
+        Optional<ResourceRecordMetadata> match = Iterables.tryFind(api.listByNameAndType(name, type),
+                new Predicate<ResourceRecordMetadata>() {
+            @Override
+            public boolean apply(ResourceRecordMetadata recordMetadata) {
+                return Transformers.toRDataFunction().apply(recordMetadata.getRecord()).equals(rdata);
+            }
+         });
+        
+        if (match.isPresent()) {
+            return Optional.of(match.get().getGuid());
+        }
+        
+        return Optional.absent();
     }
 
-    @Override
     public void replace(ResourceRecordSet<?> rrset) {
-        throw new UnsupportedOperationException("not yet implemented");
+        for (Map<String, Object> rdata : rrset) {
+            Optional<String> guid = find(rrset.getName(), rrset.getType(), rdata);
+            checkState(guid.isPresent(), "record not found");
+            api.update(guid.get(), Transformers.toResourceRecordFunction().toResourceRecord(
+                    rrset.getName(), rrset.getType(), rrset.getTTL().get(), rdata));
+        }
     }
-
 }
