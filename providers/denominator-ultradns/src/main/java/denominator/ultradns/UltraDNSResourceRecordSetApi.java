@@ -4,7 +4,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Iterables.transform;
 import static com.google.common.collect.Ordering.usingToString;
-import static denominator.ultradns.GroupByRecordNameAndTypeIterator.parseRdataList;
+import static denominator.ultradns.Converters.toRdataMap;
 
 import java.util.Iterator;
 import java.util.List;
@@ -70,7 +70,7 @@ public final class UltraDNSResourceRecordSetApi implements denominator.ResourceR
             if (!ttl.isPresent())
                 ttl = Optional.of(reference.getRecord().getTTL());
             ResourceRecord record = reference.getRecord();
-            builder.add(parseRdataList(record.getType(), record.getRData()));
+            builder.add(toRdataMap(record));
         }
         return Optional.<ResourceRecordSet<?>> of(builder.ttl(ttl.get()).build());
     }
@@ -107,7 +107,7 @@ public final class UltraDNSResourceRecordSetApi implements denominator.ResourceR
                 ttlToApply = Optional.of(record.getTTL());
             ResourceRecord updateTTL = record.toBuilder().ttl(ttlToApply.or(defaultTTL)).build();
 
-            Map<String, Object> rdata = parseRdataList(record.getType(), record.getRData());
+            Map<String, Object> rdata = toRdataMap(record);
             if (recordsLeftToCreate.contains(rdata)) {
                 recordsLeftToCreate.remove(rdata);
                 // all ok.
@@ -159,7 +159,7 @@ public final class UltraDNSResourceRecordSetApi implements denominator.ResourceR
 
         for (ResourceRecordMetadata reference : references) {
             ResourceRecord record = reference.getRecord();
-            Map<String, Object> rdata = parseRdataList(record.getType(), record.getRData());
+            Map<String, Object> rdata = toRdataMap(record);
             if (recordsLeftToCreate.contains(rdata)) {
                 recordsLeftToCreate.remove(rdata);
                 // all ok.
@@ -194,7 +194,7 @@ public final class UltraDNSResourceRecordSetApi implements denominator.ResourceR
             return;
         for (ResourceRecordMetadata reference : references) {
             ResourceRecord record = reference.getRecord();
-            if (rrset.contains(parseRdataList(record.getType(), record.getRData())))
+            if (rrset.contains(toRdataMap(record)))
                 api.delete(reference.getGuid());
         }
     }
