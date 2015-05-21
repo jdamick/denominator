@@ -1,9 +1,8 @@
 package denominator.ultradns;
 
 import denominator.CheckConnectionLiveTest;
-import denominator.Live.UseTestGraph;
+import denominator.Live;
 
-@UseTestGraph(UltraDNSTestGraph.class)
+@Live.UseTestGraph(UltraDNSTestGraph.class)
 public class UltraDNSCheckConnectionLiveTest extends CheckConnectionLiveTest {
-
 }

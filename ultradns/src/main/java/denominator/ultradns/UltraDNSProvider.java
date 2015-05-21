@@ -1,15 +1,7 @@
 package denominator.ultradns;
 
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.Map;
-import java.util.Set;
-
-import javax.inject.Named;
-import javax.inject.Singleton;
-
+import com.google.common.base.Charsets;
+import com.google.gson.TypeAdapter;
 import dagger.Provides;
 import denominator.BasicProvider;
 import denominator.CheckConnection;
@@ -21,25 +13,26 @@ import denominator.config.ConcatBasicAndQualifiedResourceRecordSets;
 import denominator.config.NothingToClose;
 import denominator.config.WeightedUnsupported;
 import denominator.profile.GeoResourceRecordSetApi;
-import denominator.ultradns.UltraDNS.DirectionalGroup;
-import denominator.ultradns.UltraDNS.DirectionalRecord;
-import denominator.ultradns.UltraDNSContentHandlers.DirectionalGroupHandler;
-import denominator.ultradns.UltraDNSContentHandlers.DirectionalPoolListHandler;
-import denominator.ultradns.UltraDNSContentHandlers.DirectionalRecordListHandler;
-import denominator.ultradns.UltraDNSContentHandlers.IDHandler;
-import denominator.ultradns.UltraDNSContentHandlers.NetworkStatusHandler;
-import denominator.ultradns.UltraDNSContentHandlers.RRPoolListHandler;
-import denominator.ultradns.UltraDNSContentHandlers.RecordListHandler;
-import denominator.ultradns.UltraDNSContentHandlers.RegionTableHandler;
-import denominator.ultradns.UltraDNSContentHandlers.ZoneNamesHandler;
-import denominator.ultradns.UltraDNSErrorDecoder.UltraDNSError;
 import feign.Feign;
 import feign.Logger;
-import feign.Request.Options;
+import feign.Request;
+import feign.RequestTemplate;
 import feign.codec.Decoder;
-import feign.sax.SAXDecoder;
-
-import static dagger.Provides.Type.SET;
+import feign.codec.EncodeException;
+import feign.codec.Encoder;
+import feign.gson.GsonDecoder;
+import feign.gson.GsonEncoder;
+import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Type;
+import java.net.URLEncoder;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.logging.Level;
+import javax.inject.Singleton;
 
 public class UltraDNSProvider extends BasicProvider {
 
@@ -54,7 +47,7 @@ public class UltraDNSProvider extends BasicProvider {
    */
   public UltraDNSProvider(String url) {
     this.url =
-        url == null || url.isEmpty() ? "https://ultra-api.ultradns.com:8443/UltraDNS_WS/v01" : url;
+        url == null || url.isEmpty() ? "https://restapi.ultradns.com/v1" : url;
   }
 
   @Override
@@ -122,33 +115,42 @@ public class UltraDNSProvider extends BasicProvider {
 
     @Provides
     @Singleton
-    ZoneApi provideZoneApi(UltraDNSZoneApi api) {
-      return api;
+    ZoneApi provideZoneApi(UltraDNS api) {
+      return new UltraDNSZoneApi(api);
     }
 
-    @Provides
-    @Named("accountID")
-    String account(InvalidatableAccountIdSupplier accountId) {
-      return accountId.get();
-    }
+
+//    @Provides
+//    @Named("accountID")
+//    String account(InvalidatableAccountIdSupplier accountId) {
+//      return accountId.get();
+//    }
+
 
     @Provides
     @Singleton
-    ResourceRecordSetApi.Factory provideResourceRecordSetApiFactory(
-        UltraDNSResourceRecordSetApi.Factory factory) {
-      return factory;
+    ResourceRecordSetApi.Factory provideResourceRecordSetApiFactory(UltraDNSResourceRecordSetApi.Factory api) {
+        return api;
     }
 
-    @Provides(type = SET)
+    @Provides(type = Provides.Type.SET)
     QualifiedResourceRecordSetApi.Factory factoryToProfiles(GeoResourceRecordSetApi.Factory in) {
       return in;
     }
+
   }
 
   @dagger.Module(injects = UltraDNSResourceRecordSetApi.Factory.class,
-      complete = false // doesn't bind Provider used by UltraDNSTarget
+      complete = false, // doesn't bind Provider used by UltraDNSTarget
+library = true
   )
   public static final class FeignModule {
+
+    @Provides
+    @Singleton
+    OAuth ultraDNSOAuth(Feign feign, OAuthTarget target) {
+      return feign.newInstance(target);
+    }
 
     @Provides
     @Singleton
@@ -158,13 +160,23 @@ public class UltraDNSProvider extends BasicProvider {
 
     @Provides
     Logger logger() {
-      return new Logger.NoOpLogger();
+      java.util.logging.Logger.getLogger(Logger.class.getName()).setLevel(Level.FINE);
+      return new Logger() {
+
+        @Override
+        protected void log(String configKey, String format, Object... args) {
+          System.out.println(String.format(methodTag(configKey) + format, args));
+        }
+      };
+      //return new Logger.NoOpLogger();
     }
 
     @Provides
     Logger.Level logLevel() {
-      return Logger.Level.NONE;
+      //return Logger.Level.NONE;
+      return Logger.Level.FULL;
     }
+
 
     @Provides
     @Singleton
@@ -175,19 +187,47 @@ public class UltraDNSProvider extends BasicProvider {
        * UltraDNS#addDirectionalPoolRecord(DirectionalRecord, DirectionalGroup, String)} can take up
        * to 10 minutes to complete.
        */
-      Options options = new Options(10 * 1000, 10 * 60 * 1000);
+      Request.Options options = new Request.Options(10 * 1000, 10 * 60 * 1000);
       Decoder decoder = decoder();
       return Feign.builder()
-          .logger(logger)
+          .logger(logger())
           .logLevel(logLevel)
           .options(options)
-          .encoder(new UltraDNSFormEncoder())
+          .encoder(encoder())
           .decoder(decoder)
-          .errorDecoder(new UltraDNSErrorDecoder(decoder))
+          //.errorDecoder(new UltraDNSErrorDecoder(decoder))
           .build();
     }
 
+    static Encoder encoder() {
+      return new Encoder() {
+        GsonEncoder gsonEncoder = new GsonEncoder();
+        @Override
+        public void encode(Object object, Type bodyType, RequestTemplate template)
+            throws EncodeException {
+          if (template.headers().get("Content-Type").equals("application/x-www-form-urlencoded") &&
+              bodyType == Map.class) {
+
+            Map<String, Object> form = (Map<String, Object>) object;
+            for (Map.Entry<String, Object> entry : form.entrySet()) {
+              try {
+                entry.setValue(URLEncoder.encode(entry.getValue().toString(),
+                    Charsets.UTF_8.name()));
+              } catch (UnsupportedEncodingException e) {
+                throw new EncodeException("unable to encode: " + entry.getKey(), e);
+              }
+            }
+          } else {
+            gsonEncoder.encode(object, bodyType, template);
+          }
+        }
+      };
+    }
+
     static Decoder decoder() {
+        return new GsonDecoder(Arrays.<TypeAdapter<?>>asList(
+            new UltraDNS.NetworkStatusAdapter()));
+/*
       return SAXDecoder.builder()
           .registerContentHandler(NetworkStatusHandler.class)
           .registerContentHandler(IDHandler.class)
@@ -200,6 +240,7 @@ public class UltraDNSProvider extends BasicProvider {
           .registerContentHandler(DirectionalGroupHandler.class)
           .registerContentHandler(UltraDNSError.class)
           .build();
+          */
     }
   }
 }
